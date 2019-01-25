@@ -1,58 +1,54 @@
 Attribute VB_Name = "Lookups"
 Const MAX_RESULTS_SIZE As Long = 100
+Const DEFAULT_RETURN_VALUE As Variant = ""
 
-Public Function BaseLookup(ByVal Field As String, ParamArray Lookups() As Variant) As Variant
-
-    BaseLookup = FlexLookup_( _
-        Caller:=Application.Caller, ShtName:="BASE", _
-        Field:=Field, Grouped:=True, Sorted:=True, _
-        RowLookup:=False, _
-        ProtoLookups:=Lookups)
-
-End Function
-
-Public Function RowLookup(ByVal ShtName As String, _
-                            ByVal Grouped As Boolean, ByVal Sorted As Boolean, _
+Public Function RowLookup(ByVal Location As Variant, _
+                            ByVal Unique As Boolean, ByVal Sorted As Boolean, _
                             ParamArray Lookups() As Variant) As Variant
     RowLookup = FlexLookup_( _
-        Caller:=Application.Caller, ShtName:=ShtName, _
-        Field:="", Grouped:=Grouped, Sorted:=Sorted, _
+        Caller:=Application.Caller, Location:=Location, _
+        Field:="", Unique:=Unique, Sorted:=Sorted, _
         RowLookup:=True, _
         ProtoLookups:=Lookups)
 
 End Function
 
-Public Function MultiLookup(ByVal ShtName As String, ByVal Field As String, _
-                            ByVal Grouped As Boolean, ByVal Sorted As Boolean, _
+Public Function MultiLookup(ByVal Location As Variant, ByVal Field As String, _
+                            ByVal Unique As Boolean, ByVal Sorted As Boolean, _
                             ParamArray Lookups() As Variant) As Variant
 
     MultiLookup = FlexLookup_( _
-        Caller:=Application.Caller, ShtName:=ShtName, _
-        Field:=Field, Grouped:=Grouped, Sorted:=Sorted, _
+        Caller:=Application.Caller, Location:=Location, _
+        Field:=Field, Unique:=Unique, Sorted:=Sorted, _
         ProtoLookups:=Lookups)
 
 End Function
 
-Public Function TableLookup(ByVal ShtName As String, ByVal Fields As Variant, _
+Public Function TableLookup(ByVal Location As Variant, ByVal Fields As Variant, _
+                            ByVal Unique As Boolean, _
                             ParamArray Lookups() As Variant)
 
     TableLookup = FlexLookup_( _
-        Caller:=Application.Caller, ShtName:=ShtName, Sorted:=False, _
-        Fields:=Fields, ProtoLookups:=Lookups)
+        Caller:=Application.Caller, Location:=Location, _
+        Fields:=Fields, Unique:=Unique, Sorted:=False, _
+        ProtoLookups:=Lookups)
 
 End Function
 
 Private Function FlexLookup_( _
     ByRef Caller As Variant, _
-    ByVal ShtName As String, _
+    ByVal Location As Variant, _
     ByVal ProtoLookups As Variant, _
     Optional ByVal Field As String = "", Optional ByVal Fields As Variant, _
-    Optional ByVal Grouped As Boolean = True, Optional ByVal Sorted As Boolean = True, _
+    Optional ByVal Unique As Boolean = True, Optional ByVal Sorted As Boolean = True, _
     Optional ByVal RowLookup As Boolean = False) As Variant
     ' ------------------------------------------------------------------------------------
     ' As a general rule of thumb, this function should not be accessed directly,
     ' but rather from one of its wrapper functions
     ' ------------------------------------------------------------------------------------
+    Dim LocationRange As Range
+    Set LocationRange = GetLocationRange(Location)
+
     
     Dim L As Long, x As Long, ProtoSize As Long, _
         FieldPos As Long, NonBlankFilters As Long, ResultSize As Long
@@ -87,7 +83,7 @@ Private Function FlexLookup_( _
     On Error Resume Next
     If UBound(Fields) - LBound(Fields) = 0 Then Fields = ¨(Fields)
     On Error GoTo 0
-    FieldPos = GetFieldPos(ShtName, Field)
+    FieldPos = GetFieldPos(Location, Field)
     
     ' If we're trying to retrieve a single field and can't find it, then raise an error
     If Field <> "" And FieldPos = 0 And Not RowIndexLookup Then GoTo RaiseNoMatchForField
@@ -95,20 +91,30 @@ Private Function FlexLookup_( _
     NumberOfFields = 1
     If Arrays.IsArrayAllocated(Fields) Then NumberOfFields = UBound(Fields)
     
+    On Error Resume Next
+    Set Fields = Fields(0)
+    On Error GoTo 0
+    
     If Field = "" Then
-        'NumberOfFields = 0
+        If RowLookup Then
+            NumberOfFields = LocationRange.Columns.Count
+        Else
+            NumberOfFields = WorksheetFunction.Max(Fields.Columns.Count, Fields.Rows.Count)
+        End If
+        
+        'If RowLookup And UBound(Fields) = 0 Then Fields = LocationRange.Rows(0)
         ReDim ThisResult(0 To NumberOfFields - 1)
         ReDim Matches(0 To NumberOfFields - 1, 0 To 0) As Variant
         ReDim MatchesPos(0 To NumberOfFields - 1) As Variant
         For x = 1 To NumberOfFields
             ' We must cast the value to string to account for formulas in the
             ' lookup filters
-            MatchesPos(x - 1) = GetFieldPos(ShtName, CStr(Fields(x)))
+            MatchesPos(x - 1) = GetFieldPos(Location, CStr(Fields(x)))
         Next
         
     End If
     
-    If (RowIndexLookup = False And FieldPos = 0 And Field <> "") Or ShtName = "" Or Field = "" Then FlexLookup_ = Results
+    If (RowIndexLookup = False And FieldPos = 0 And Field <> "") Or Field = "" Then FlexLookup_ = Results
     
     ' If this is being called from a worksheet, there must be a selection range where the
     ' results will go, so we can stop iterating once we reach that number
@@ -162,7 +168,7 @@ Private Function FlexLookup_( _
             If ((Lookups(i) <> "") And (Lookups(i + 1) <> "")) Then
                 LookupFields(x) = CStr(Lookups(i))
                 LookupValues(x) = CStr(Lookups(i + 1))
-                LookupPos(x) = GetFieldPos(ShtName, Lookups(i))
+                LookupPos(x) = GetFieldPos(Location, Lookups(i))
                 x = x + 1
             End If
 
@@ -175,8 +181,8 @@ Private Function FlexLookup_( _
     End If
     
 StartReturn:
-    With ActiveWorkbook.Sheets(ShtName)
-        lastrow = .UsedRange.Rows.Count
+    With LocationRange
+        lastrow = .Rows.Count
         For xRow = 2 To lastrow Step 1
             Append = True
 
@@ -228,26 +234,21 @@ StartReturn:
                 InsertedValueLength = 0
             End If
             
-            If Append = True And LastValue <> InsertedValue And InsertedValueLength > 0 Then
+            If Append = True And (Unique = False Or LastValue <> InsertedValue) And InsertedValueLength > 0 Then
                 Inserted = False
                 If Field = "" Then
                     LastValue = SHA1HASH(Join(ThisResult, ""))
-                    Inserted = AppendToArrayUniquely(Matches, ThisResult, PreviousResults, InsertedValue)
+                    Inserted = AppendToArray(Matches, ThisResult, PreviousResults, InsertedValue, Uniquely:=Unique)
                     On Error Resume Next
                     PreviousResults.Add InsertedValue, 1
                     On Error GoTo 0
-                    Z = 1
                 Else
                     LastValue = InsertedValue
-                    Inserted = AppendToArrayUniquely(Matches, InsertedValue)
+                    Inserted = AppendToArray(Matches, InsertedValue, Uniquely:=Unique)
                 End If
                 
                 If Inserted = True Then
-                    'If Field = "" Then
-                        ResultsSize = ResultsSize + 1 * NumberOfFields
-                    'Else
-                    '    ResultsSize = ResultsSize + 1
-                    'End If
+                    ResultsSize = ResultsSize + 1 * NumberOfFields
                     If ResultsSize >= MaxResultsSize Then GoTo ReturnResults
                 End If
 
@@ -265,21 +266,19 @@ ReturnResults:
     
     On Error GoTo SimpleReturn
     If Field <> "" Then
+        If UBound(Matches) = 0 And FirstElementInArray(Matches) = vbEmpty Then Matches(0) = DEFAULT_RETURN_VALUE
         FlexLookup_ = ReturnArray(Matches, Caller)
     Else
         ReDim Matches2( _
             LBound(Matches, 1) To UBound(Matches, 2), _
             LBound(Matches, 2) To UBound(Matches, 1))
         Call TransposeArray(Matches, Matches2)
-        Call QuickSortArray(Matches2, , , 0, vbTextCompare)
+        If Sorted Then Call QuickSortArray(Matches2, , , 0, vbTextCompare)
         Call TransposeArray(Matches2, Matches)
         Erase Matches2
         FlexLookup_ = ReturnTable(Matches, Caller)
     End If
 
-    If Field = "" Then
-        Z = 1
-    End If
     GoTo ExitCleanly
     
 SimpleReturn:
@@ -298,8 +297,8 @@ RaiseNoMatchForField:
     GoTo ExitCleanly
     
 ExitCleanly:
-    If UBound(Matches) - LBound(Matches) = 0 And VarType(Matches(0)) = vbEmpty Then
-        Set FlexLookup_ = Nothing
+    If UBound(Matches) - LBound(Matches) = 0 And VarType(FirstElementInArray(Matches)) = vbEmpty Then
+        Set FlexLookup_ = DEFAULT_RETURN_VALUE
     End If
     Set PreviousResults = Nothing
     Set ThisResult = Nothing
@@ -307,70 +306,13 @@ ExitCleanly:
 
 End Function
 
-Public Function COUNTB(ByVal V As Variant) As Long
-    COUNTB = 0
-    
-    If IsError(V) Then Exit Function
-    If Not IsArrayEmpty(V) Then
-        If UBound(V) - LBound(V) = 0 Then
-            If V(UBound(V)) = vbEmpty Then Exit Function
-        End If
-        
-        COUNTB = WorksheetFunction.CountA(V)
-    End If
-    
-End Function
-
-Public Function UniqueLookup(Field As String, Optional Sorted As Boolean = False) As Variant
-    Dim FieldPos As Long, xRow As Long, ReturnRows As Long
-    Dim Results() As Variant
-    ReDim Results(0 To 0) As Variant
-    
-    FieldPos = GetFieldPos(Field)
-    
-    ResultsSize = 0
-    MaxResultsSize = Application.Caller.Rows.Count * Application.Caller.Columns.Count
-    
-    With ActiveWorkbook.Sheets("Base")
-        lastrow = .UsedRange.Rows.Count
-        
-        For xRow = 2 To lastrow Step 1
-            InsertedValue = .Cells(xRow, FieldPos).Value
-            If LastValue <> InsertedValue Then
-                LastValue = InsertedValue
-                Inserted = False
-                Inserted = AppendToArrayUniquely(Results, InsertedValue)
-                
-                If Inserted = True Then
-                    ResultsSize = ResultsSize + 1
-                    If ResultsSize >= MaxResultsSize Then GoTo ReturnResults
-                End If
-            End If
-                        
-        Next xRow
-    
-    End With
-    
-ReturnResults:
-    
-    If Sorted Then
-        Call QSortInPlace(Results)
-    End If
-    
-    On Error GoTo SimpleReturn
-    UniqueLookup = ReturnArray(Results, Application.Caller)
-    Exit Function
-    
-SimpleReturn:
-    UniqueLookup = Results
-    Exit Function
-                                                  
-End Function
-
-Public Function GetFieldPos(ByVal ShtName As String, ByVal Field As String)
+Public Function GetFieldPos(ByVal Location As Variant, ByVal Field As String)
     On Error GoTo ErrHandler
+    Dim LocationRange As Range
+    Set LocationRange = GetLocationRange(Location)
+    
     With Application.WorksheetFunction
-        GetFieldPos = .Match(Field, ActiveWorkbook.Sheets(ShtName).Range("1:1"), 0)
+        GetFieldPos = .Match(Field, LocationRange.Range("1:1"), 0)
         Exit Function
     End With
     
@@ -378,154 +320,6 @@ ErrHandler:
     GetFieldPos = 0
     On Error GoTo 0
     Exit Function
-    
-End Function
-
-Public Function GetPivotTerra(ByVal DataFieldName As String, ByRef PTRange As Range, ParamArray OpArgs() As Variant) As Variant
-    
-    If IsMissing(OpArgs) Then
-        GetPivotTerra = 0
-        GoTo Ex
-    End If
-    
-    With Application
-        SU = .ScreenUpdating
-        CU = .Calculation
-        .ScreenUpdating = False
-        .Calculation = xlCalculationManual
-    End With
-    
-    Dim PT As PivotTable
-    Dim DataField As PivotField
-    Set PT = PTRange.PivotTable
-    
-    Dim ParsedArgs As Variant
-    ReDim ParsedArgs(0 To 0)
-    
-    Dim x As Long
-    x = 0
-    For i = LBound(OpArgs) To UBound(OpArgs) Step 2
-        If OpArgs(i + 1) = "" Then GoTo SkipEmpty
-        If x = 0 Then
-            ParsedArgs(x) = OpArgs(i)
-        Else
-            Call InsertElementIntoArray(ParsedArgs, x, OpArgs(i))
-        End If
-        'Select Case UCase(OpArgs(i))
-        
-        'Case "MES"
-        '    thisValue = Int(OpArgs(i + 1))
-        
-        'Case Else
-            On Error GoTo IsStr
-            thisValue = Int(OpArgs(i + 1))
-            GoTo IsInt
-IsStr:
-            thisValue = CStr(OpArgs(i + 1))
-            Resume Next
-IsInt:
-        
-        'End Select
-        
-        'Debug.Print x + 1 & " " & ThisValue
-        Call InsertElementIntoArray(ParsedArgs, x + 1, thisValue)
-        
-        x = x + 2
-SkipEmpty:
-    Next
-    
-    Select Case UBound(ParsedArgs) - LBound(ParsedArgs) + 1
-        Case 2
-            GetPivotTerra = PT.GetPivotData(DataFieldName, _
-            ParsedArgs(0), ParsedArgs(1))
-        
-        Case 4
-            GetPivotTerra = PT.GetPivotData(DataFieldName, _
-            ParsedArgs(0), ParsedArgs(1), ParsedArgs(2), ParsedArgs(3))
-        
-        Case 6
-            GetPivotTerra = PT.GetPivotData(DataFieldName, _
-            ParsedArgs(0), ParsedArgs(1), ParsedArgs(2), ParsedArgs(3), _
-            ParsedArgs(4), ParsedArgs(5))
-        
-        Case 8
-            GetPivotTerra = PT.GetPivotData(DataFieldName, _
-            ParsedArgs(0), ParsedArgs(1), ParsedArgs(2), ParsedArgs(3), _
-            ParsedArgs(4), ParsedArgs(5), ParsedArgs(6), ParsedArgs(7))
-        
-        Case 10
-            GetPivotTerra = PT.GetPivotData(DataFieldName, _
-            ParsedArgs(0), ParsedArgs(1), ParsedArgs(2), ParsedArgs(3), _
-            ParsedArgs(4), ParsedArgs(5), ParsedArgs(6), ParsedArgs(7), _
-            ParsedArgs(8), ParsedArgs(9))
-            
-        Case 12
-            GetPivotTerra = PT.GetPivotData(DataFieldName, _
-            ParsedArgs(0), ParsedArgs(1), ParsedArgs(2), ParsedArgs(3), _
-            ParsedArgs(4), ParsedArgs(5), ParsedArgs(6), ParsedArgs(7), _
-            ParsedArgs(8), ParsedArgs(9), ParsedArgs(10), ParsedArgs(11))
-            
-        Case 14
-            GetPivotTerra = PT.GetPivotData(DataFieldName, _
-            ParsedArgs(0), ParsedArgs(1), ParsedArgs(2), ParsedArgs(3), _
-            ParsedArgs(4), ParsedArgs(5), ParsedArgs(6), ParsedArgs(7), _
-            ParsedArgs(8), ParsedArgs(9), ParsedArgs(10), ParsedArgs(11), _
-            ParsedArgs(12), ParsedArgs(13))
-                        
-        Case 16
-            GetPivotTerra = PT.GetPivotData(DataFieldName, _
-            ParsedArgs(0), ParsedArgs(1), ParsedArgs(2), ParsedArgs(3), _
-            ParsedArgs(4), ParsedArgs(5), ParsedArgs(6), ParsedArgs(7), _
-            ParsedArgs(8), ParsedArgs(9), ParsedArgs(10), ParsedArgs(11), _
-            ParsedArgs(12), ParsedArgs(13), ParsedArgs(14), ParsedArgs(15))
-                        
-        Case 18
-            GetPivotTerra = PT.GetPivotData(DataFieldName, _
-            ParsedArgs(0), ParsedArgs(1), ParsedArgs(2), ParsedArgs(3), _
-            ParsedArgs(4), ParsedArgs(5), ParsedArgs(6), ParsedArgs(7), _
-            ParsedArgs(8), ParsedArgs(9), ParsedArgs(10), ParsedArgs(11), _
-            ParsedArgs(12), ParsedArgs(13), ParsedArgs(14), ParsedArgs(15), _
-            ParsedArgs(16), ParsedArgs(17))
-                        
-        Case 20
-            GetPivotTerra = PT.GetPivotData(DataFieldName, _
-            ParsedArgs(0), ParsedArgs(1), ParsedArgs(2), ParsedArgs(3), _
-            ParsedArgs(4), ParsedArgs(5), ParsedArgs(6), ParsedArgs(7), _
-            ParsedArgs(8), ParsedArgs(9), ParsedArgs(10), ParsedArgs(11), _
-            ParsedArgs(12), ParsedArgs(13), ParsedArgs(14), ParsedArgs(15), _
-            ParsedArgs(16), ParsedArgs(17), ParsedArgs(18), ParsedArgs(19))
-
-        Case 22
-            GetPivotTerra = PT.GetPivotData(DataFieldName, _
-            ParsedArgs(0), ParsedArgs(1), ParsedArgs(2), ParsedArgs(3), _
-            ParsedArgs(4), ParsedArgs(5), ParsedArgs(6), ParsedArgs(7), _
-            ParsedArgs(8), ParsedArgs(9), ParsedArgs(10), ParsedArgs(11), _
-            ParsedArgs(12), ParsedArgs(13), ParsedArgs(14), ParsedArgs(15), _
-            ParsedArgs(16), ParsedArgs(17), ParsedArgs(18), ParsedArgs(19), _
-            ParsedArgs(20), ParsedArgs(21))
-
-        Case 24
-            GetPivotTerra = PT.GetPivotData(DataFieldName, _
-            ParsedArgs(0), ParsedArgs(1), ParsedArgs(2), ParsedArgs(3), _
-            ParsedArgs(4), ParsedArgs(5), ParsedArgs(6), ParsedArgs(7), _
-            ParsedArgs(8), ParsedArgs(9), ParsedArgs(10), ParsedArgs(11), _
-            ParsedArgs(12), ParsedArgs(13), ParsedArgs(14), ParsedArgs(15), _
-            ParsedArgs(16), ParsedArgs(17), ParsedArgs(18), ParsedArgs(19), _
-            ParsedArgs(20), ParsedArgs(21), ParsedArgs(22), ParsedArgs(23))
-            
-        Case Else
-            GetPivotTerra = 0
-            GoTo Ex
-            
-    End Select
-        
-    
-Ex:
-    'Restore original application status
-    With Application
-        .ScreenUpdating = SU
-        .Calculation = CU
-    End With
     
 End Function
 
@@ -541,8 +335,21 @@ Function GetRow(ByVal Arr As Variant, Optional ByVal Index As Long = 0) As Varia
     For i = LBound(Arr) To UBound(Arr) - 1
         Results(i) = Arr(i)(Index)
     Next
-    
-    Z = 1
+
     GetRow = Results
     
+End Function
+
+Function GetLocationRange(ByRef Location As Variant) As Range
+    Dim r As Range
+    On Error GoTo AsString
+    Set r = Location
+    GoTo EndFunction
+    
+AsString:
+    Set r = ActiveWorkbook.Worksheets(Location).UsedRange
+    GoTo EndFunction
+    
+EndFunction:
+    Set GetLocationRange = r
 End Function

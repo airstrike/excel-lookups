@@ -1,23 +1,14 @@
 Attribute VB_Name = "ArraysExtension"
 'This module was previously named Arrays2.
-Public Function Foobar() As Variant
-    Dim Results(0 To 1)
-    Results(0) = "foo"
-    Results(1) = "bar"
-    
-    Foobar = Results
-
-End Function
-
 Public Function ReturnArray(Arr, Optional ByRef Application_Caller As Variant) As Variant
     Dim RowX As Long, ColX As Long, n As Long
     n = 0
-    'If IsMissing(Application_Caller) Then
+    If IsMissing(Application_Caller) Then
         CallerRows = UBound(Arr) + 1
-    'Else
-    '    CallerRows = Application_Caller.Rows.Count
-    '    CallerCols = Application_Caller.Columns.Count
-    'End If
+    Else
+        CallerRows = Application_Caller.Rows.Count
+        CallerCols = Application_Caller.Columns.Count
+    End If
     ReDim Results(1 To CallerRows, 0 To 0)
     If CallerRows = 1 Then
         'If we return just one cell, excel will repeat it for every cell in the worksheet,
@@ -94,23 +85,30 @@ Function PresentInArray(InputArray, Value) As Boolean
     PresentInArray = False
 End Function
 
-Function AppendToArrayUniquely(InputArray, Value, _
+Function AppendToArray(InputArray, Value, _
     Optional ByRef Reference As Object, Optional ByVal ReferenceItem As String, _
-    Optional ByVal Index As Long) As Boolean
+    Optional ByVal Index As Long = -1, Optional ByVal Uniquely As Boolean = False) As Boolean
     Dim bool_ As Boolean
     bool_ = False
     Insert = False
     
-    If Reference Is Nothing Then
-        If Not PresentInArray(InputArray, Value) Then Insert = True
+    If Uniquely = False Then
+        Insert = True
     Else
-        If Not Reference.Exists(ReferenceItem) Then Insert = True
+        If Reference Is Nothing Then
+            If Not PresentInArray(InputArray, Value) Then Insert = True
+        Else
+            If Not Reference.Exists(ReferenceItem) Then Insert = True
+        End If
     End If
     
     If Insert = True Then
-        If Index = -1 Then Index = UBound(InputArray) + 1
-        If UBound(InputArray) = 0 And IsEmpty(InputArray(0)) Then
+        If Index = -1 Then Index = UBound(InputArray)
+        If UBound(InputArray) = 0 And FirstElementInArray(InputArray) = vbEmpty Then
+            On Error Resume Next
             InputArray(0) = Value
+            InputArray(0, 0) = Value
+            On Error GoTo 0
             bool_ = True
         Else
             If Arrays.NumberOfArrayDimensions(InputArray) = 1 Then
@@ -118,8 +116,6 @@ Function AppendToArrayUniquely(InputArray, Value, _
                 bool_ = InsertElementIntoArray(InputArray, Index + 1, Value)
             Else
                 If InputArray(0, 0) <> vbEmpty Then
-                    'ReDim Preserve InputArray(0 To UBound(InputArray) + 1, _
-                        LBound(InputArray, 2) To UBound(InputArray, 2))
                     ReDim Preserve InputArray( _
                         LBound(InputArray, 1) To UBound(InputArray, 1), _
                         LBound(InputArray, 2) To UBound(InputArray, 2) + 1)
@@ -134,7 +130,7 @@ Function AppendToArrayUniquely(InputArray, Value, _
         End If
     End If
 
-    AppendToArrayUniquely = bool_
+    AppendToArray = bool_
         
 End Function
 
@@ -151,6 +147,7 @@ End Function
 Function GetItem2Dim(Arr, IndexA, IndexB, Optional Default As String = "")
     On Error GoTo ErrHandler
     GetItem2Dim = Arr(IndexB, IndexA)
+    If GetItem2Dim = vbEmpty Then GetItem2Dim = Default
     Exit Function
     
 ErrHandler:
@@ -183,3 +180,17 @@ Public Function SortRange(ByVal Rng As Range, _
     SortTable = ReturnTable(Arr, Rng)
 
 End Function
+
+Public Function FirstElementInArray(Arr As Variant)
+    If Arrays.NumberOfArrayDimensions(Arr) = 1 Then
+        FirstElementInArray = Arr(LBound(Arr, 1))
+    Else
+        FirstElementInArray = Arr(LBound(Arr, 1), LBound(Arr, 2))
+    End If
+End Function
+
+Public Function IsArrayReallyEmpty(Arr As Variant) As Boolean
+    IsArrayReallyEmpty = False
+    If FirstElementInArray(Arr) <> vbEmpty And IsArrayEmpty(Arr) <> True Then IsArrayReallyEmpty = True
+End Function
+
