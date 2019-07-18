@@ -85,11 +85,23 @@ Private Function FlexLookup_( _
     On Error GoTo 0
     FieldPos = GetFieldPos(Location, Field)
     
+    ' If this is being called from a worksheet, there must be a selection range where the
+    ' results will go, so we can stop iterating once we reach that number
+    ' If there's no Caller.Rows/Caller.Columns, though, then just use the default 100
+    On Error Resume Next
+    CallerRows = 0
+    CallerCols = 0
+    CallerRows = Caller.Rows.Count
+    CallerCols = Caller.Columns.Count
+    MaxResultsSize = CallerRows * CallerCols
+    On Error GoTo 0
+    If MaxResultsSize = 0 Then MaxResultsSize = MAX_RESULTS_SIZE
+    
     ' If we're trying to retrieve a single field and can't find it, then raise an error
     If Field <> "" And FieldPos = 0 And Not RowIndexLookup Then GoTo RaiseNoMatchForField
     
     NumberOfFields = 1
-    If Arrays.IsArrayAllocated(Fields) Then NumberOfFields = UBound(Fields)
+    If Arrays.IsArrayAllocated(Fields) And UBound(Fields) > 0 Then NumberOfFields = UBound(Fields)
     
     On Error Resume Next
     Set Fields = Fields(0)
@@ -99,7 +111,9 @@ Private Function FlexLookup_( _
         If RowLookup Then
             NumberOfFields = LocationRange.Columns.Count
         Else
-            NumberOfFields = WorksheetFunction.Max(Fields.Columns.Count, Fields.Rows.Count)
+            NumberOfFields = WorksheetFunction.Max( _
+                WorksheetFunction.Min(Caller.Columns.Count, Fields.Columns.Count), _
+                Fields.Rows.Count)
         End If
         
         'If RowLookup And UBound(Fields) = 0 Then Fields = LocationRange.Rows(0)
@@ -115,18 +129,7 @@ Private Function FlexLookup_( _
     End If
     
     If (RowIndexLookup = False And FieldPos = 0 And Field <> "") Or Field = "" Then FlexLookup_ = Results
-    
-    ' If this is being called from a worksheet, there must be a selection range where the
-    ' results will go, so we can stop iterating once we reach that number
-    ' If there's no Caller.Rows/Caller.Columns, though, then just use the default 100
-    On Error Resume Next
-    CallerRows = 0
-    CallerCols = 0
-    CallerRows = Caller.Rows.Count
-    CallerCols = Caller.Columns.Count
-    MaxResultsSize = CallerRows * CallerCols
-    On Error GoTo 0
-    If MaxResultsSize = 0 Then MaxResultsSize = MAX_RESULTS_SIZE
+
     
     ' Make Lookups() from the ProtoLookups() sent from the wrapper functions
     If Not IsMissing(ProtoLookups) Then
@@ -194,6 +197,8 @@ StartReturn:
                         s = .Cells(xRow, MatchesPos(x)).Value
                         ThisResult(x) = s
                     Next
+                    InsertedValue = SHA1HASH(Join(ThisResult, ""))
+                    InsertedValueLength = 1
                 Else
                     InsertedValue = .Cells(xRow, FieldPos).Value
                     InsertedValueLength = Len(InsertedValue)
@@ -241,7 +246,6 @@ StartReturn:
                     Inserted = AppendToArray(Matches, ThisResult, PreviousResults, InsertedValue, Uniquely:=Unique)
                     On Error Resume Next
                     PreviousResults.Add InsertedValue, 1
-                    On Error GoTo 0
                 Else
                     LastValue = InsertedValue
                     Inserted = AppendToArray(Matches, InsertedValue, Uniquely:=Unique)
@@ -251,7 +255,6 @@ StartReturn:
                     ResultsSize = ResultsSize + 1 * NumberOfFields
                     If ResultsSize >= MaxResultsSize Then GoTo ReturnResults
                 End If
-
             End If
 
 SkipAppending:
@@ -264,10 +267,13 @@ ReturnResults:
         Call QSortInPlace(Matches)
     End If
     
+    'If UBound(Matches) = 0 And FirstElementInArray(Matches) <> vbEmpty Then GoTo SimpleReturn
+    
     On Error GoTo SimpleReturn
     If Field <> "" Then
         If UBound(Matches) = 0 And FirstElementInArray(Matches) = vbEmpty Then Matches(0) = DEFAULT_RETURN_VALUE
         FlexLookup_ = ReturnArray(Matches, Caller)
+        GoTo ExitCleanly
     Else
         ReDim Matches2( _
             LBound(Matches, 1) To UBound(Matches, 2), _
@@ -297,7 +303,10 @@ RaiseNoMatchForField:
     GoTo ExitCleanly
     
 ExitCleanly:
-    If UBound(Matches) - LBound(Matches) = 0 And VarType(FirstElementInArray(Matches)) = vbEmpty Then
+    On Error GoTo 0
+    If UBound(Matches) - LBound(Matches) = 0 And _
+        VarType(FirstElementInArray(Matches)) = vbEmpty Then 'And _
+        'Matches = vbEmpty Then
         Set FlexLookup_ = DEFAULT_RETURN_VALUE
     End If
     Set PreviousResults = Nothing
@@ -312,7 +321,7 @@ Public Function GetFieldPos(ByVal Location As Variant, ByVal Field As String)
     Set LocationRange = GetLocationRange(Location)
     
     With Application.WorksheetFunction
-        GetFieldPos = .Match(Field, LocationRange.Range("1:1"), 0)
+        GetFieldPos = .Match(Field, LocationRange.Rows(1), 0)
         Exit Function
     End With
     

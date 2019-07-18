@@ -9,19 +9,26 @@ Public Function ReturnArray(Arr, Optional ByRef Application_Caller As Variant) A
         CallerRows = Application_Caller.Rows.Count
         CallerCols = Application_Caller.Columns.Count
     End If
-    ReDim Results(1 To CallerRows, 0 To 0)
-    If CallerRows = 1 Then
-        'If we return just one cell, excel will repeat it for every cell in the worksheet,
-        'so we need to pad the remaining cells with #N/A for consistency
-        ReDim Results(1 To 2, 0 To 0)
-        Results(1, 0) = Left(GetItem(Arr, n), 254)
-        Results(2, 0) = CVErr(xlErrNA)
+    If CallerRows = 1 And CallerCols = 1 Then
+        Dim SingleResult(1 To 1)
+        SingleResult(1) = Left(GetItem(Arr, n), 254)
+        ReturnArray = SingleResult
+        Exit Function
     Else
         ReDim Results(1 To CallerRows, 0 To 0)
-        For RowX = 1 To CallerRows
-            Results(RowX, 0) = Left(GetItem(Arr, n), 254)
-            n = n + 1
-        Next RowX
+        If CallerRows = 1 Then
+            'If we return just one cell, excel will repeat it for every cell in the worksheet,
+            'so we need to pad the remaining cells with #N/A for consistency
+            ReDim Results(1 To 2, 0 To 0)
+            Results(1, 0) = Left(GetItem(Arr, n), 254)
+            Results(2, 0) = CVErr(xlErrNA)
+        Else
+            ReDim Results(1 To CallerRows, 0 To 0)
+            For RowX = 1 To CallerRows
+                Results(RowX, 0) = Left(GetItem(Arr, n), 254)
+                n = n + 1
+            Next RowX
+        End If
     End If
     
 Exiting:
@@ -29,7 +36,7 @@ Exiting:
 
 End Function
 
-Public Function ReturnTable(Arr, Optional ByRef Application_Caller As Variant)
+Public Function ReturnTable(Arr, Optional ByRef Application_Caller As Variant) As Variant
     If IsMissing(Application_Caller) Then
         CallerRows = UBound(Arr)
         CallerCols = 1
@@ -38,15 +45,15 @@ Public Function ReturnTable(Arr, Optional ByRef Application_Caller As Variant)
         CallerCols = Application_Caller.Columns.Count
     End If
 
-    ReDim Results(1 To CallerRows, 1 To CallerCols)
+    ReDim ReturnTableResults(1 To CallerRows, 1 To CallerCols) As Variant
     For RowNdx = 1 To CallerRows
         For ColNdx = 1 To CallerCols
             n = n + 1
-            Results(RowNdx, ColNdx) = GetItem2Dim(Arr, RowNdx - 1, ColNdx - 1)
+            ReturnTableResults(RowNdx, ColNdx) = GetItem2Dim(Arr, RowNdx - 1, ColNdx - 1)
         Next ColNdx
      Next RowNdx
     
-    ReturnTable = Results
+    ReturnTable = ReturnTableResults
 
 End Function
 
@@ -106,8 +113,15 @@ Function AppendToArray(InputArray, Value, _
         If Index = -1 Then Index = UBound(InputArray)
         If UBound(InputArray) = 0 And FirstElementInArray(InputArray) = vbEmpty Then
             On Error Resume Next
-            InputArray(0) = Value
-            InputArray(0, 0) = Value
+            If IsArray(Value) Then 'TableLookup
+                If UBound(Value) = 0 Then 'TableLookup with a single column
+                    InputArray(0) = Value(0) 'Avoids creating Array(0,0)(0) construct
+                    InputArray(0, 0) = Value(0)
+                End If
+            Else
+                InputArray(0) = Value
+                InputArray(0, 0) = Value
+            End If
             On Error GoTo 0
             bool_ = True
         Else
@@ -115,6 +129,7 @@ Function AppendToArray(InputArray, Value, _
                 ReDim Preserve InputArray(LBound(InputArray) To UBound(InputArray))
                 bool_ = InsertElementIntoArray(InputArray, Index + 1, Value)
             Else
+                bool_ = False
                 If InputArray(0, 0) <> vbEmpty Then
                     ReDim Preserve InputArray( _
                         LBound(InputArray, 1) To UBound(InputArray, 1), _
@@ -125,7 +140,9 @@ Function AppendToArray(InputArray, Value, _
                 End If
                 For x = LBound(Value) To UBound(Value)
                     InputArray(x, f) = Value(x)
+                    bool_ = True
                 Next
+                
             End If
         End If
     End If
@@ -144,10 +161,10 @@ ErrHandler:
 
 End Function
 
-Function GetItem2Dim(Arr, IndexA, IndexB, Optional Default As String = "")
+Function GetItem2Dim(ByVal Arr As Variant, IndexA, IndexB, Optional Default As String = "") As Variant
     On Error GoTo ErrHandler
     GetItem2Dim = Arr(IndexB, IndexA)
-    If GetItem2Dim = vbEmpty Then GetItem2Dim = Default
+    If GetItem2Dim = vbEmpty And VarType(GetItem2Dim) <> vbDouble Then GetItem2Dim = Default
     Exit Function
     
 ErrHandler:
