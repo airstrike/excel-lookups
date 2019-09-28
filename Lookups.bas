@@ -43,8 +43,8 @@ Private Function FlexLookup_( _
     Optional ByVal Unique As Boolean = True, Optional ByVal Sorted As Boolean = True, _
     Optional ByVal RowLookup As Boolean = False) As Variant
     ' ------------------------------------------------------------------------------------
-    ' As a general rule of thumb, this function should not be accessed directly,
-    ' but rather from one of its wrapper functions
+    ' As a general rule, this function should not be accessed directly. Instead, use one
+    ' of its wrapper functions (TableLookup, MultiLookup, RowLookup) instead
     ' ------------------------------------------------------------------------------------
     Dim LocationRange As Range
     Set LocationRange = GetLocationRange(Location)
@@ -192,9 +192,14 @@ StartReturn:
             If L = 0 Or NonBlankFilters = 0 Then
                 If RowIndexLookup = True Then
                     InsertedValue = xRow
-                ElseIf Field = "" Then
+                ElseIf IsTableLookup Then
                     For x = LBound(MatchesPos) To UBound(MatchesPos)
-                        s = .Cells(xRow, MatchesPos(x)).Value
+                        xMatch = MatchesPos(x)
+                        If xMatch <> 0 Then
+                            s = .Cells(xRow, MatchesPos(x)).Value
+                        Else
+                            s = vbEmpty
+                        End If
                         ThisResult(x) = s
                     Next
                     InsertedValue = SHA1HASH(Join(ThisResult, ""))
