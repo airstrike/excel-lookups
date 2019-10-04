@@ -1,13 +1,23 @@
 Attribute VB_Name = "ArraysExtension"
 'This module was previously named Arrays2.
-Public Function ReturnArray(Arr, Optional ByRef Application_Caller As Variant) As Variant
+Public Function ReturnArray(Arr, Optional ByRef Caller As Variant) As Variant
     Dim RowX As Long, ColX As Long, n As Long
     n = 0
-    If IsMissing(Application_Caller) Then
+    If IsMissing(Caller) Then
         CallerRows = UBound(Arr) + 1
+    ElseIf TypeName(Caller) = "Range" Then
+        If Caller.HasFormula Then
+            If InStr(Caller.FormulaArray, "=MultiLookup(") = 0 And _
+               InStr(Caller.FormulaArray, "=TableLookup(") = 0 Then
+                CallerRows = UBound(Arr) + 1
+            Else
+                CallerRows = Caller.Rows.Count
+                CallerCols = Caller.Columns.Count
+            End If
+        End If
     Else
-        CallerRows = Application_Caller.Rows.Count
-        CallerCols = Application_Caller.Columns.Count
+        CallerRows = Caller.Rows.Count
+        CallerCols = Caller.Columns.Count
     End If
     If CallerRows = 1 And CallerCols = 1 Then
         Dim SingleResult(1 To 1)
@@ -16,18 +26,26 @@ Public Function ReturnArray(Arr, Optional ByRef Application_Caller As Variant) A
         Exit Function
     Else
         ReDim Results(1 To CallerRows, 0 To 0)
-        If CallerRows = 1 Then
+        If CallerRows = 1 And CallerCols = 1 Then
             'If we return just one cell, excel will repeat it for every cell in the worksheet,
             'so we need to pad the remaining cells with #N/A for consistency
             ReDim Results(1 To 2, 0 To 0)
             Results(1, 0) = Left(GetItem(Arr, n), 254)
             Results(2, 0) = CVErr(xlErrNA)
         Else
-            ReDim Results(1 To CallerRows, 0 To 0)
-            For RowX = 1 To CallerRows
-                Results(RowX, 0) = Left(GetItem(Arr, n), 254)
-                n = n + 1
-            Next RowX
+            If CallerCols = 1 Or CallerCols = vbEmpty Then
+                ReDim Results(1 To CallerRows, 0 To 0)
+                For RowX = 1 To CallerRows
+                    Results(RowX, 0) = Left(GetItem(Arr, n), 254)
+                    n = n + 1
+                Next RowX
+            Else
+                ReDim Results(0 To 0, 1 To CallerCols)
+                For ColX = 1 To CallerCols
+                    Results(0, ColX) = Left(GetItem(Arr, n), 254)
+                    n = n + 1
+                Next ColX
+            End If
         End If
     End If
     
@@ -36,13 +54,24 @@ Exiting:
 
 End Function
 
-Public Function ReturnTable(Arr, Optional ByRef Application_Caller As Variant) As Variant
-    If IsMissing(Application_Caller) Then
-        CallerRows = UBound(Arr)
-        CallerCols = 1
+Public Function ReturnTable(Arr, Optional ByRef Caller As Variant) As Variant
+    If IsMissing(Caller) Then
+        CallerRows = UBound(Arr, 1)
+        CallerCols = UBound(Arr, 2)
+    ElseIf TypeName(Caller) = "Range" Then
+        If Caller.HasFormula Then
+            If InStr(Caller.FormulaArray, "=MultiLookup(") = 0 And _
+               InStr(Caller.FormulaArray, "=TableLookup(") = 0 Then
+                CallerRows = UBound(Arr, 1)
+                CallerCols = UBound(Arr, 2)
+            Else
+                CallerRows = Caller.Rows.Count
+                CallerCols = Caller.Columns.Count
+            End If
+        End If
     Else
-        CallerRows = Application_Caller.Rows.Count
-        CallerCols = Application_Caller.Columns.Count
+        CallerRows = Caller.Rows.Count
+        CallerCols = Caller.Columns.Count
     End If
 
     ReDim ReturnTableResults(1 To CallerRows, 1 To CallerCols) As Variant

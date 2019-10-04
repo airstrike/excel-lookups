@@ -1,9 +1,9 @@
 Attribute VB_Name = "Lookups"
-Const MAX_RESULTS_SIZE As Long = 100
-Const DEFAULT_RETURN_VALUE As Variant = ""
+Const MAX_RESULTS_SIZE As Long = 2500
+Const DEFAULT_RETURN_VALUE As Variant = vbEmpty
 
 Public Function RowLookup(ByVal Location As Variant, _
-                            ByVal Unique As Boolean, ByVal Sorted As Boolean, _
+                            ByVal Unique As Long, ByVal Sorted As Variant, _
                             ParamArray Lookups() As Variant) As Variant
     RowLookup = FlexLookup_( _
         Caller:=Application.Caller, Location:=Location, _
@@ -14,7 +14,7 @@ Public Function RowLookup(ByVal Location As Variant, _
 End Function
 
 Public Function MultiLookup(ByVal Location As Variant, ByVal Field As String, _
-                            ByVal Unique As Boolean, ByVal Sorted As Boolean, _
+                            ByVal Unique As Long, ByVal Sorted As Variant, _
                             ParamArray Lookups() As Variant) As Variant
 
     MultiLookup = FlexLookup_( _
@@ -25,7 +25,7 @@ Public Function MultiLookup(ByVal Location As Variant, ByVal Field As String, _
 End Function
 
 Public Function TableLookup(ByVal Location As Variant, ByVal Fields As Variant, _
-                            ByVal Unique As Boolean, _
+                            ByVal Unique As Long, _
                             ParamArray Lookups() As Variant)
 
     TableLookup = FlexLookup_( _
@@ -40,7 +40,7 @@ Private Function FlexLookup_( _
     ByVal Location As Variant, _
     ByVal ProtoLookups As Variant, _
     Optional ByVal Field As String = "", Optional ByVal Fields As Variant, _
-    Optional ByVal Unique As Boolean = True, Optional ByVal Sorted As Boolean = True, _
+    Optional ByVal Unique As Long = 1, Optional ByVal Sorted As Variant = 1, _
     Optional ByVal RowLookup As Boolean = False) As Variant
     ' ------------------------------------------------------------------------------------
     ' As a general rule, this function should not be accessed directly. Instead, use one
@@ -50,7 +50,7 @@ Private Function FlexLookup_( _
     Set LocationRange = GetLocationRange(Location)
 
     
-    Dim L As Long, x As Long, ProtoSize As Long, _
+    Dim l As Long, x As Long, ProtoSize As Long, _
         FieldPos As Long, NonBlankFilters As Long, ResultSize As Long
     Dim Results() As Variant, Matches() As Variant, MatchesPos As Variant, _
         LookupFields() As Variant, LookupValues() As Variant, _
@@ -61,7 +61,8 @@ Private Function FlexLookup_( _
     
     Dim Append As Boolean
     Dim LastValue As Variant
-    Dim FieldCount As Long
+    Dim FieldCount As Long, FieldsRowsCount As Long, FieldsColumnsCount As Long
+    Dim ReturnAsArray As Boolean
     ReDim Results(0 To 0) As Variant
     ReDim Matches(0 To 0) As Variant
     
@@ -81,7 +82,11 @@ Private Function FlexLookup_( _
     If Field = "" Then IsTableLookup = True
     
     On Error Resume Next
-    If UBound(Fields) - LBound(Fields) = 0 Then Fields = ¨(Fields)
+    FieldsBase = 0
+    If TypeName(Fields) = "Range" Then FieldsBase = 1
+    If UBound(Fields) - LBound(Fields) = 0 Then
+        Fields = ¨(Fields)
+    End If
     On Error GoTo 0
     FieldPos = GetFieldPos(Location, Field)
     
@@ -97,8 +102,19 @@ Private Function FlexLookup_( _
     On Error GoTo 0
     If MaxResultsSize = 0 Then MaxResultsSize = MAX_RESULTS_SIZE
     
+    ' If this is wrapped around a bigger formula, then return every possible result
+    If TypeName(Caller) = "Range" Then
+        If Caller.HasFormula Then
+            If InStr(Caller.FormulaArray, "=MultiLookup(") = 0 And _
+               InStr(Caller.FormulaArray, "=TableLookup(") = 0 Then
+                ReturnAsArray = True
+                MaxResultsSize = MAX_RESULTS_SIZE
+            End If
+        End If
+    End If
+    
     ' If we're trying to retrieve a single field and can't find it, then raise an error
-    If Field <> "" And FieldPos = 0 And Not RowIndexLookup Then GoTo RaiseNoMatchForField
+    If Not IsTableLookup And FieldPos = 0 And Not RowIndexLookup Then GoTo RaiseNoMatchForField
     
     NumberOfFields = 1
     If Arrays.IsArrayAllocated(Fields) And UBound(Fields) > 0 Then NumberOfFields = UBound(Fields)
@@ -107,30 +123,50 @@ Private Function FlexLookup_( _
     Set Fields = Fields(0)
     On Error GoTo 0
     
-    If Field = "" Then
+    If IsTableLookup Then
         If RowLookup Then
             NumberOfFields = LocationRange.Columns.Count
         Else
-            NumberOfFields = WorksheetFunction.Max( _
-                WorksheetFunction.Min(Caller.Columns.Count, Fields.Columns.Count), _
-                Fields.Rows.Count)
+            On Error Resume Next
+            'If Fields for TableLookup() are provided directly in-cell e.g. {"foo","bar"}, we can't
+            'access the .Columns / .Rows properties
+            FieldsColumnsCount = UBound(Fields)
+            FieldsRowsCount = UBound(Fields)
+            FieldsColumnsCount = Fields.Columns.Count
+            FieldsRowsCount = Fields.Rows.Count
+            On Error GoTo 0
+            'If ReturnAsArray Then
+            '    NumberOfFields = Number
+            'Else
+                NumberOfFields = WorksheetFunction.Max( _
+                    WorksheetFunction.Min(Caller.Columns.Count, FieldsColumnsCount), _
+                    FieldsRowsCount)
+            'End If
         End If
         
         'If RowLookup And UBound(Fields) = 0 Then Fields = LocationRange.Rows(0)
-        ReDim ThisResult(0 To NumberOfFields - 1)
-        ReDim Matches(0 To NumberOfFields - 1, 0 To 0) As Variant
-        ReDim MatchesPos(0 To NumberOfFields - 1) As Variant
-        For x = 1 To NumberOfFields
+        ReDim ThisResult(0 To WorksheetFunction.Max(0, NumberOfFields - 1))
+        ReDim Matches(0 To WorksheetFunction.Max(0, NumberOfFields - 1), 0 To 0) As Variant
+        ReDim MatchesPos(0 To WorksheetFunction.Max(0, NumberOfFields - 1)) As Variant
+        For x = FieldsBase To NumberOfFields 'FIXME? x = 1
             ' We must cast the value to string to account for formulas in the
             ' lookup filters
-            MatchesPos(x - 1) = GetFieldPos(Location, CStr(Fields(x)))
+            On Error GoTo TrySingleElementArray
+            MatchesPos(x - FieldsBase) = GetFieldPos(Location, CStr(Fields(x)))
+            GoTo NextNumberOfFields
+            
+TrySingleElementArray:
+            On Error GoTo 0
+            MatchesPos(x - FieldsBase) = GetFieldPos(Location, CStr(Fields(x)(1)))
+            
+NextNumberOfFields:
+            On Error GoTo 0
         Next
         
     End If
     
-    If (RowIndexLookup = False And FieldPos = 0 And Field <> "") Or Field = "" Then FlexLookup_ = Results
+    If (RowIndexLookup = False And FieldPos = 0 And Not IsTableLookup) Or IsTableLookup Then FlexLookup_ = Results
 
-    
     ' Make Lookups() from the ProtoLookups() sent from the wrapper functions
     If Not IsMissing(ProtoLookups) Then
         ReDim Lookups(0 To UBound(ProtoLookups))
@@ -141,15 +177,15 @@ Private Function FlexLookup_( _
         Next
         
         ' Set some defaults before starting the loop
-        L = UBound(Lookups) - LBound(Lookups) + 1
-        NonBlankFilters = L
+        l = UBound(Lookups) - LBound(Lookups) + 1
+        NonBlankFilters = l
     End If
     
     FieldCount = 0
     ResultsSize = 0
     x = 0
     
-    If L > 0 Then
+    If l > 0 Then
         For i = LBound(Lookups) To UBound(Lookups) Step 2
             If ((Lookups(i) <> "") And (Lookups(i + 1) <> "")) Then
                 FieldCount = FieldCount + 1
@@ -189,7 +225,7 @@ StartReturn:
         For xRow = 2 To lastrow Step 1
             Append = True
 
-            If L = 0 Or NonBlankFilters = 0 Then
+            If l = 0 Or NonBlankFilters = 0 Then
                 If RowIndexLookup = True Then
                     InsertedValue = xRow
                 ElseIf IsTableLookup Then
@@ -218,7 +254,7 @@ StartReturn:
                 Next xField
                 If RowIndexLookup Then
                     InsertedValue = xRow
-                ElseIf Field = "" Then
+                ElseIf IsTableLookup Then
                     For x = LBound(MatchesPos) To UBound(MatchesPos)
                         If MatchesPos(x) = 0 Then 'Skip empty columns
                             s = ""
@@ -246,7 +282,7 @@ StartReturn:
             
             If Append = True And (Unique = False Or LastValue <> InsertedValue) And InsertedValueLength > 0 Then
                 Inserted = False
-                If Field = "" Then
+                If IsTableLookup Then
                     LastValue = SHA1HASH(Join(ThisResult, ""))
                     Inserted = AppendToArray(Matches, ThisResult, PreviousResults, InsertedValue, Uniquely:=Unique)
                     On Error Resume Next
@@ -268,39 +304,47 @@ SkipAppending:
     End With
     
 ReturnResults:
-    If Sorted And Field <> "" Then
+    If Sorted <> 0 And Not IsTableLookup Then
         Call QSortInPlace(Matches)
+        If Sorted = -1 Then x = QSort.ReverseArrayInPlace(Matches)
     End If
     
     'If UBound(Matches) = 0 And FirstElementInArray(Matches) <> vbEmpty Then GoTo SimpleReturn
     
-    On Error GoTo SimpleReturn
-    If Field <> "" Then
-        If UBound(Matches) = 0 And FirstElementInArray(Matches) = vbEmpty Then Matches(0) = DEFAULT_RETURN_VALUE
-        FlexLookup_ = ReturnArray(Matches, Caller)
-        GoTo ExitCleanly
-    Else
+    'On Error GoTo TryToReturnAnything
+    If IsTableLookup Then
         ReDim Matches2( _
             LBound(Matches, 1) To UBound(Matches, 2), _
             LBound(Matches, 2) To UBound(Matches, 1))
         Call TransposeArray(Matches, Matches2)
         If Sorted Then Call QuickSortArray(Matches2, , , 0, vbTextCompare)
+        'If Sorted = -1 Then x = QSort.ReverseArrayInPlace(Matches2, True)
         Call TransposeArray(Matches2, Matches)
         Erase Matches2
         FlexLookup_ = ReturnTable(Matches, Caller)
+    Else
+        If UBound(Matches) = 0 And FirstElementInArray(Matches) = vbEmpty Then Matches(0) = DEFAULT_RETURN_VALUE
+        FlexLookup_ = ReturnArray(Matches, Caller)
     End If
-
-    GoTo ExitCleanly
     
-SimpleReturn:
-    FlexLookup_ = Matches
+    'On Error GoTo 0
+    'GoTo Returns
+
+    
+'TryToReturnAnything:
+'    FlexLookup_ = Matches
+    
+'Returns:
     If Matches(0) = vbEmpty Then
         FlexLookup_ = Nothing
+        Set PreviousResults = Nothing
+        Set ThisResults = Nothing
+        Exit Function
     End If
     GoTo ExitCleanly
     
 ErrHandler:
-    FlexLookup_ = 0
+    FlexLookup_ = DEFAULT_RETURN_VALUE
     GoTo ExitCleanly
 
 RaiseNoMatchForField:
@@ -367,3 +411,7 @@ AsString:
 EndFunction:
     Set GetLocationRange = r
 End Function
+
+
+
+
